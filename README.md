@@ -1,6 +1,6 @@
-# 文字云存储
+# Risk Detection Dashboard
 
-一个轻量的文字信息存储系统，适合保存笔记、会议记录、灵感、摘要等纯文本内容。当前版本使用 Node.js 内置模块实现，无需安装依赖，数据保存在本地 JSON 文件中；部署到云服务器时，把项目放到服务器并设置持久化磁盘即可运行。
+一个用于识别和复盘 risk 玩家行为的 dashboard。上传订单 CSV 后，系统会按 `user_id` 聚合投注、派彩、净赢、RTP、active 时间、IP 分布、策略、子弹等级、鱼值和投注时段，并生成可筛选、可排序、可点击查看玩家明细的页面。
 
 ## 启动
 
@@ -8,7 +8,7 @@
 npm start
 ```
 
-默认访问地址：
+默认访问：
 
 ```text
 http://127.0.0.1:3000
@@ -20,36 +20,45 @@ http://127.0.0.1:3000
 PORT=8080 DATA_DIR=/path/to/persistent/data npm start
 ```
 
-## 功能
+## CSV 字段
 
-- 新增、编辑、删除文字信息
-- 标题、内容、标签搜索
-- JSON 文件持久化存储
-- REST API，便于后续接入移动端、桌面端或云数据库
+Dashboard 会使用这些字段：
+
+- `user_id`
+- `user_name`
+- `nick_name`
+- `duration`
+- `bet`
+- `payout`
+- `profit`
+- `ip`
+- `event_timestamp`
+- `strategy_name`
+- `bullet_level`
+- `multiplier`
+- `fish_value`
+
+没有投注记录的用户也会展示在排行中，并标记为 `无投注记录`。
 
 ## API
 
 ```text
-GET    /api/health
-GET    /api/items?q=关键词
-POST   /api/items
-GET    /api/items/:id
-PUT    /api/items/:id
-DELETE /api/items/:id
+GET  /api/health
+GET  /api/dashboard-data
+POST /api/upload-dashboard-data
 ```
 
-`POST /api/items` 和 `PUT /api/items/:id` 的请求体：
+`POST /api/upload-dashboard-data` 使用 `multipart/form-data`：
 
-```json
-{
-  "title": "标题",
-  "content": "文字内容",
-  "tags": "项目, 工作"
-}
-```
+- `dataFile`: CSV 文件
+- `lookupIps`: 可选，值为 `on` 时会调用 `ip-api.com` 解析 risk IP 地区
 
-## 云端部署建议
+## 部署
 
-- 小规模个人使用：部署到任意 Node.js 云服务器，挂载持久化磁盘，并把 `DATA_DIR` 指向持久化目录。
-- 多人协作或生产环境：把 `server.js` 的 `readItems/writeItems` 换成 PostgreSQL、MySQL、MongoDB 或对象存储。
-- 对外开放前：增加登录认证、HTTPS、访问频率限制和自动备份。
+项目包含 Docker 和 Render Blueprint 配置：
+
+- `Dockerfile`
+- `requirements.txt`
+- `render.yaml`
+
+部署到 Render 时，`render.yaml` 会创建 web service 和 `/app/data` 持久磁盘，用于保存上传 CSV、生成后的 dashboard JSON 和 IP 查询缓存。

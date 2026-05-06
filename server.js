@@ -1,7 +1,6 @@
 const http = require("node:http");
 const { execFile } = require("node:child_process");
-const { randomUUID } = require("node:crypto");
-const { readFile, writeFile, mkdir, stat } = require("node:fs/promises");
+const { readFile, writeFile, mkdir } = require("node:fs/promises");
 const { promisify } = require("node:util");
 const path = require("node:path");
 
@@ -10,7 +9,6 @@ const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
-const DATA_FILE = path.join(DATA_DIR, "text-items.json");
 const DASHBOARD_DATA_FILE = path.join(DATA_DIR, "risk-dashboard.json");
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 const execFileAsync = promisify(execFile);
@@ -23,31 +21,6 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml"
 };
 
-async function ensureDataFile() {
-  await mkdir(DATA_DIR, { recursive: true });
-
-  try {
-    await stat(DATA_FILE);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-    await writeFile(DATA_FILE, "[]\n", "utf8");
-  }
-}
-
-async function readItems() {
-  await ensureDataFile();
-  const raw = await readFile(DATA_FILE, "utf8");
-  const parsed = JSON.parse(raw || "[]");
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-async function writeItems(items) {
-  await ensureDataFile();
-  await writeFile(DATA_FILE, `${JSON.stringify(items, null, 2)}\n`, "utf8");
-}
-
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
@@ -55,26 +28,6 @@ function sendJson(res, statusCode, payload) {
 
 function sendError(res, statusCode, message) {
   sendJson(res, statusCode, { error: message });
-}
-
-async function parseJsonBody(req) {
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    const error = new Error("请求体必须是有效的 JSON。");
-    error.statusCode = 400;
-    throw error;
-  }
 }
 
 async function parseMultipartBody(req) {
@@ -145,21 +98,6 @@ async function rebuildDashboard(sourcePath, lookupIps) {
   });
 }
 
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function toPublicItem(item) {
-  return {
-    id: item.id,
-    title: item.title,
-    content: item.content,
-    tags: item.tags,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt
-  };
-}
-
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/health" && req.method === "GET") {
     sendJson(res, 200, { ok: true });
@@ -213,120 +151,6 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  if (url.pathname === "/api/items" && req.method === "GET") {
-    const items = await readItems();
-    const query = normalizeText(url.searchParams.get("q")).toLowerCase();
-
-    const filtered = query
-      ? items.filter((item) => {
-          const searchable = [item.title, item.content, ...(item.tags || [])].join(" ").toLowerCase();
-          return searchable.includes(query);
-        })
-      : items;
-
-    sendJson(res, 200, filtered.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(toPublicItem));
-    return;
-  }
-
-  if (url.pathname === "/api/items" && req.method === "POST") {
-    const body = await parseJsonBody(req);
-    const title = normalizeText(body.title);
-    const content = normalizeText(body.content);
-    const tags = Array.isArray(body.tags)
-      ? body.tags.map(normalizeText).filter(Boolean)
-      : normalizeText(body.tags)
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-
-    if (!title) {
-      sendError(res, 400, "标题不能为空。");
-      return;
-    }
-
-    if (!content) {
-      sendError(res, 400, "内容不能为空。");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const item = {
-      id: randomUUID(),
-      title,
-      content,
-      tags: [...new Set(tags)],
-      createdAt: now,
-      updatedAt: now
-    };
-
-    const items = await readItems();
-    items.push(item);
-    await writeItems(items);
-    sendJson(res, 201, toPublicItem(item));
-    return;
-  }
-
-  const itemMatch = url.pathname.match(/^\/api\/items\/([a-f0-9-]+)$/);
-  if (itemMatch && req.method === "GET") {
-    const items = await readItems();
-    const item = items.find((candidate) => candidate.id === itemMatch[1]);
-    if (!item) {
-      sendError(res, 404, "没有找到这条文字信息。");
-      return;
-    }
-    sendJson(res, 200, toPublicItem(item));
-    return;
-  }
-
-  if (itemMatch && req.method === "PUT") {
-    const body = await parseJsonBody(req);
-    const items = await readItems();
-    const index = items.findIndex((candidate) => candidate.id === itemMatch[1]);
-
-    if (index === -1) {
-      sendError(res, 404, "没有找到这条文字信息。");
-      return;
-    }
-
-    const title = normalizeText(body.title);
-    const content = normalizeText(body.content);
-    if (!title || !content) {
-      sendError(res, 400, "标题和内容不能为空。");
-      return;
-    }
-
-    const tags = Array.isArray(body.tags)
-      ? body.tags.map(normalizeText).filter(Boolean)
-      : normalizeText(body.tags)
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean);
-
-    items[index] = {
-      ...items[index],
-      title,
-      content,
-      tags: [...new Set(tags)],
-      updatedAt: new Date().toISOString()
-    };
-
-    await writeItems(items);
-    sendJson(res, 200, toPublicItem(items[index]));
-    return;
-  }
-
-  if (itemMatch && req.method === "DELETE") {
-    const items = await readItems();
-    const nextItems = items.filter((candidate) => candidate.id !== itemMatch[1]);
-    if (nextItems.length === items.length) {
-      sendError(res, 404, "没有找到这条文字信息。");
-      return;
-    }
-    await writeItems(nextItems);
-    sendJson(res, 200, { ok: true });
-    return;
-  }
-
   sendError(res, 404, "接口不存在。");
 }
 
@@ -375,13 +199,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureDataFile()
+mkdir(DATA_DIR, { recursive: true })
   .then(() => {
     server.listen(PORT, HOST, () => {
-      console.log(`Text cloud store is running at http://${HOST}:${PORT}`);
+      console.log(`Risk dashboard is running at http://${HOST}:${PORT}`);
     });
   })
   .catch((error) => {
-    console.error("Failed to initialize storage:", error);
+    console.error("Failed to initialize dashboard:", error);
     process.exit(1);
   });

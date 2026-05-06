@@ -1,16 +1,16 @@
 {
-  "name": "text-cloud-store",
+  "name": "risk-detection-dashboard",
   "version": "1.0.0",
-  "description": "A lightweight cloud-ready system for storing text information.",
+  "description": "A deployable dashboard for risk player detection and IP distribution analysis.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
   "keywords": [
-    "text",
-    "storage",
-    "cloud-ready"
+    "risk",
+    "dashboard",
+    "analytics"
   ],
   "author": "",
   "license": "MIT",
