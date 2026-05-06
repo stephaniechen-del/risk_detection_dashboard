@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Risk 玩家 IP Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Risk Player Monitor</p>
+          <h1>Risk 玩家 IP Dashboard</h1>
+        </div>
+        <div class="status" id="status">加载中</div>
+      </header>
+
+      <section class="upload-panel" aria-label="上传 dashboard 数据">
+        <form id="uploadForm">
+          <label class="file-field">
+            上传数据 CSV
+            <input id="dataFile" name="dataFile" type="file" accept=".csv,text/csv" />
+          </label>
+          <label class="check-field">
+            <input id="lookupIps" name="lookupIps" type="checkbox" />
+            <span>上传后解析 risk IP 地区</span>
+          </label>
+          <button id="uploadButton" type="submit">上传并生成 Dashboard</button>
+          <span id="uploadStatus" class="upload-status">支持包含 user_id、bet、payout、profit、ip、duration、event_timestamp 的 CSV</span>
+        </form>
+      </section>
+
+      <section class="controls" aria-label="risk 过滤条件">
+        <label>
+          最小订单
+          <input id="minOrders" type="number" min="0" step="100" />
+        </label>
+        <label>
+          净赢大于
+          <input id="minProfit" type="number" step="100" />
+        </label>
+        <label>
+          IP 数大于
+          <input id="minIpCount" type="number" min="0" step="1" />
+        </label>
+        <label>
+          Active 小时小于等于
+          <input id="maxActiveHours" type="number" min="0" step="1" />
+        </label>
+        <label>
+          单一 IP 占比 %
+          <input id="minTopIpShare" type="number" min="0" max="100" step="5" />
+        </label>
+        <label>
+          排行倒序
+          <select id="sortBy">
+            <option value="risk_score">Risk 分数</option>
+            <option value="rtp">RTP</option>
+            <option value="total_profit">净赢</option>
+            <option value="total_orders">订单数</option>
+            <option value="total_bet">下注金额</option>
+            <option value="total_payout">派彩金额</option>
+            <option value="active_duration_seconds">Active 时间</option>
+            <option value="top_ip_share">单一 IP 占比</option>
+            <option value="ip_count">IP 数</option>
+          </select>
+        </label>
+        <label>
+          搜索 user_id / IP
+          <input id="search" type="search" placeholder="输入 user_id 或 IP" />
+        </label>
+      </section>
+
+      <section class="kpis" aria-label="总览指标">
+        <article>
+          <span>展示玩家</span>
+          <strong id="riskCount">-</strong>
+        </article>
+        <article>
+          <span>总订单</span>
+          <strong id="orderCount">-</strong>
+        </article>
+        <article>
+          <span>总净赢</span>
+          <strong id="profitSum">-</strong>
+        </article>
+        <article>
+          <span>平均 RTP</span>
+          <strong id="avgRtp">-</strong>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <section class="panel wide" aria-label="risk 玩家排行">
+          <div class="panel-header">
+            <h2>Risk 玩家排行</h2>
+            <div class="panel-tools">
+              <label>
+                指标分布
+                <select id="metricChartSelect">
+                  <option value="total_orders">订单</option>
+                  <option value="total_bet">下注</option>
+                  <option value="total_payout">派彩</option>
+                  <option value="total_profit">净赢</option>
+                  <option value="rtp">RTP</option>
+                  <option value="active_duration_seconds">Active 具体</option>
+                  <option value="active_hours">Active 小时</option>
+                  <option value="ip_count">IP 数</option>
+                </select>
+              </label>
+              <span id="dataMeta"></span>
+            </div>
+          </div>
+          <div id="metricChart" class="metric-chart"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>User ID</th>
+                  <th>订单</th>
+                  <th>下注</th>
+                  <th>派彩</th>
+                  <th>净赢</th>
+                  <th>RTP</th>
+                  <th>Active 具体</th>
+                  <th>Active 天/小时</th>
+                  <th>IP 数</th>
+                  <th>Top IP</th>
+                  <th>Risk 信号</th>
+                </tr>
+              </thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" aria-label="RTP 与净赢">
+          <div class="panel-header">
+            <h2>RTP / 净赢</h2>
+          </div>
+          <div id="rtpChart" class="chart"></div>
+        </section>
+
+        <section class="panel" aria-label="Top IP">
+          <div class="panel-header">
+            <h2>Top IP 分布</h2>
+          </div>
+          <div id="ipChart" class="chart"></div>
+        </section>
+
+        <section class="panel wide" aria-label="玩家详情">
+          <div class="panel-header">
+            <h2>玩家 IP 明细</h2>
+            <span id="selectedUserLabel"></span>
+          </div>
+          <div id="userDetail" class="detail-empty">选择上方任意玩家查看 IP、策略、子弹、鱼值分布</div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

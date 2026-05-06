@@ -1,0 +1,20 @@
+{
+  "name": "text-cloud-store",
+  "version": "1.0.0",
+  "description": "A lightweight cloud-ready system for storing text information.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "text",
+    "storage",
+    "cloud-ready"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

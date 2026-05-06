@@ -1,0 +1,9 @@
+.git
+.DS_Store
+node_modules
+npm-debug.log
+data/*.json
+data/uploads
+*.csv
+__pycache__/
+*.pyc
