@@ -108,11 +108,19 @@ function currentFilters() {
 
 function sortUsersDescending(users, field) {
   return users.sort((a, b) => {
-    const left = Number(a[field]) || 0;
-    const right = Number(b[field]) || 0;
+    const left = getSortValue(a, field);
+    const right = getSortValue(b, field);
     if (right !== left) return right - left;
     return a.user_id.localeCompare(b.user_id);
   });
+}
+
+function getSortValue(user, field) {
+  const groupMatch = field.match(/^group_share_(.+)$/);
+  if (groupMatch) {
+    return Number(user.group_mix?.[groupMatch[1]]?.order_share || 0);
+  }
+  return Number(user[field]) || 0;
 }
 
 function applyFilters() {
