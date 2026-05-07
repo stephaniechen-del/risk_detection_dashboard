@@ -116,6 +116,15 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         "data_date",
     ]
     df = pd.read_csv(source_path, usecols=lambda col: col in columns)
+    for column in columns:
+        if column not in df.columns:
+            df[column] = pd.NA
+
+    required_columns = ["user_id", "bet", "payout"]
+    missing_required = [column for column in required_columns if df[column].isna().all()]
+    if missing_required:
+        raise ValueError(f"CSV 缺少必要字段或字段全为空: {missing_required}")
+
     df["user_id"] = df["user_id"].astype(str)
     all_users = df.groupby("user_id", dropna=False).agg(
         user_name=("user_name", "first"),
@@ -137,12 +146,20 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         total_profit=("profit", "sum"),
         ip_count=("ip", "nunique"),
         active_duration=("duration_td", "max"),
+        first_event_time=("event_time", "min"),
+        last_event_time=("event_time", "max"),
     )
+    event_span = order_metrics["last_event_time"] - order_metrics["first_event_time"]
+    order_metrics["event_span_duration"] = event_span.where(event_span >= pd.Timedelta(0))
     grouped = all_users.join(order_metrics, how="left")
     grouped["total_orders"] = grouped["total_orders"].fillna(0).astype(int)
     for column in ["total_bet", "total_payout", "total_profit", "ip_count"]:
         grouped[column] = grouped[column].fillna(0)
-    grouped["active_duration"] = grouped["active_duration"].fillna(grouped["account_duration_td"])
+    grouped["active_duration"] = (
+        grouped["active_duration"]
+        .fillna(grouped["account_duration_td"])
+        .fillna(grouped["event_span_duration"])
+    )
     grouped["active_duration_seconds"] = grouped["active_duration"].dt.total_seconds().fillna(0).astype(int)
     grouped["rtp"] = (grouped["total_payout"] / grouped["total_bet"] * 100).fillna(0)
 

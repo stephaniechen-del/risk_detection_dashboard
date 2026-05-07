@@ -1,6 +1,7 @@
 const http = require("node:http");
 const { execFile } = require("node:child_process");
-const { readFile, writeFile, mkdir } = require("node:fs/promises");
+const { createWriteStream } = require("node:fs");
+const { readFile, mkdir } = require("node:fs/promises");
 const { promisify } = require("node:util");
 const path = require("node:path");
 
@@ -30,7 +31,23 @@ function sendError(res, statusCode, message) {
   sendJson(res, statusCode, { error: message });
 }
 
-async function parseMultipartBody(req) {
+async function writeChunk(stream, chunk) {
+  if (!chunk.length) {
+    return;
+  }
+  if (!stream.write(chunk)) {
+    await new Promise((resolve) => stream.once("drain", resolve));
+  }
+}
+
+async function endStream(stream) {
+  await new Promise((resolve, reject) => {
+    stream.end(resolve);
+    stream.once("error", reject);
+  });
+}
+
+async function parseMultipartUpload(req) {
   const contentType = req.headers["content-type"] || "";
   const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
   if (!boundaryMatch) {
@@ -40,50 +57,144 @@ async function parseMultipartBody(req) {
   }
 
   const boundary = boundaryMatch[1] || boundaryMatch[2];
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(chunk);
+  const boundaryBuffer = Buffer.from(`--${boundary}`, "latin1");
+  const delimiterBuffer = Buffer.from(`\r\n--${boundary}`, "latin1");
+  const headerBreakBuffer = Buffer.from("\r\n\r\n", "latin1");
+  const keepBytes = delimiterBuffer.length + 4;
+  const fields = {};
+  let upload = null;
+  let buffer = Buffer.alloc(0);
+  let state = "seek-boundary";
+  let currentPart = null;
+
+  await mkdir(UPLOAD_DIR, { recursive: true });
+
+  async function appendPartData(data) {
+    if (!currentPart || !data.length) {
+      return;
+    }
+    if (currentPart.stream) {
+      await writeChunk(currentPart.stream, data);
+    } else {
+      currentPart.chunks.push(data);
+    }
   }
 
-  const bodyText = Buffer.concat(chunks).toString("latin1");
-  const parts = bodyText.split(`--${boundary}`);
-  const fields = {};
-  const files = {};
-
-  for (const part of parts) {
-    if (!part || part === "--\r\n" || part === "--") {
-      continue;
+  async function closePart() {
+    if (!currentPart) {
+      return;
     }
-
-    const headerEnd = part.indexOf("\r\n\r\n");
-    if (headerEnd === -1) {
-      continue;
+    if (currentPart.stream) {
+      await endStream(currentPart.stream);
+    } else {
+      fields[currentPart.name] = Buffer.concat(currentPart.chunks).toString("utf8").trim();
     }
+    currentPart = null;
+  }
 
-    const rawHeaders = part.slice(0, headerEnd);
-    let content = part.slice(headerEnd + 4);
-    if (content.endsWith("\r\n")) {
-      content = content.slice(0, -2);
-    }
-
+  function startPart(rawHeaders) {
     const disposition = rawHeaders.match(/content-disposition:[^\r\n]+/i)?.[0] || "";
     const name = disposition.match(/name="([^"]+)"/)?.[1];
     const filename = disposition.match(/filename="([^"]*)"/)?.[1];
     if (!name) {
-      continue;
+      currentPart = { name: "", chunks: [] };
+      return;
     }
 
     if (filename !== undefined && filename !== "") {
-      files[name] = {
-        filename: path.basename(filename),
-        buffer: Buffer.from(content, "latin1"),
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const safeFilename = path.basename(filename);
+      const savedPath = path.join(UPLOAD_DIR, `${stamp}-${safeFilename}`);
+      const stream = createWriteStream(savedPath);
+      upload = {
+        fieldName: name,
+        filename: safeFilename,
+        savedPath,
+        size: 0,
+      };
+      currentPart = {
+        name,
+        stream,
       };
     } else {
-      fields[name] = Buffer.from(content, "latin1").toString("utf8").trim();
+      currentPart = {
+        name,
+        chunks: [],
+      };
     }
   }
 
-  return { fields, files };
+  for await (const chunk of req) {
+    buffer = Buffer.concat([buffer, chunk]);
+
+    while (true) {
+      if (state === "seek-boundary") {
+        const boundaryIndex = buffer.indexOf(boundaryBuffer);
+        if (boundaryIndex === -1) {
+          buffer = buffer.slice(Math.max(0, buffer.length - boundaryBuffer.length));
+          break;
+        }
+        buffer = buffer.slice(boundaryIndex + boundaryBuffer.length);
+        if (buffer.slice(0, 2).toString("latin1") === "--") {
+          await closePart();
+          return { fields, upload };
+        }
+        if (buffer.slice(0, 2).toString("latin1") === "\r\n") {
+          buffer = buffer.slice(2);
+        }
+        state = "headers";
+      }
+
+      if (state === "headers") {
+        const headerEnd = buffer.indexOf(headerBreakBuffer);
+        if (headerEnd === -1) {
+          break;
+        }
+        const rawHeaders = buffer.slice(0, headerEnd).toString("latin1");
+        buffer = buffer.slice(headerEnd + headerBreakBuffer.length);
+        startPart(rawHeaders);
+        state = "body";
+      }
+
+      if (state === "body") {
+        const delimiterIndex = buffer.indexOf(delimiterBuffer);
+        if (delimiterIndex !== -1) {
+          const data = buffer.slice(0, delimiterIndex);
+          if (upload && currentPart?.stream) {
+            upload.size += data.length;
+          }
+          await appendPartData(data);
+          await closePart();
+          buffer = buffer.slice(delimiterIndex + delimiterBuffer.length);
+          if (buffer.slice(0, 2).toString("latin1") === "--") {
+            return { fields, upload };
+          }
+          if (buffer.slice(0, 2).toString("latin1") === "\r\n") {
+            buffer = buffer.slice(2);
+          }
+          state = "headers";
+          continue;
+        }
+
+        const safeLength = buffer.length - keepBytes;
+        if (safeLength > 0) {
+          const data = buffer.slice(0, safeLength);
+          if (upload && currentPart?.stream) {
+            upload.size += data.length;
+          }
+          await appendPartData(data);
+          buffer = buffer.slice(safeLength);
+        }
+        break;
+      }
+    }
+  }
+
+  if (state === "body" && buffer.length) {
+    await appendPartData(buffer);
+  }
+  await closePart();
+  return { fields, upload };
 }
 
 async function rebuildDashboard(sourcePath, lookupIps) {
@@ -119,9 +230,8 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname === "/api/upload-dashboard-data" && req.method === "POST") {
-    const { fields, files } = await parseMultipartBody(req);
-    const upload = files.dataFile;
-    if (!upload || upload.buffer.length === 0) {
+    const { fields, upload } = await parseMultipartUpload(req);
+    if (!upload || upload.fieldName !== "dataFile" || upload.size === 0) {
       sendError(res, 400, "请选择要上传的 CSV 文件。");
       return;
     }
@@ -131,18 +241,13 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    await mkdir(UPLOAD_DIR, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const savedPath = path.join(UPLOAD_DIR, `${stamp}-${upload.filename}`);
-    await writeFile(savedPath, upload.buffer);
-
     try {
-      await rebuildDashboard(savedPath, fields.lookupIps === "on");
+      await rebuildDashboard(upload.savedPath, fields.lookupIps === "on");
       const raw = await readFile(DASHBOARD_DATA_FILE, "utf8");
       sendJson(res, 200, {
         ok: true,
         filename: upload.filename,
-        savedPath,
+        savedPath: upload.savedPath,
         dashboard: JSON.parse(raw),
       });
     } catch (error) {
