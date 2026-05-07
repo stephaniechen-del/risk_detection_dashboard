@@ -42,19 +42,20 @@ const groupColors = {
 };
 
 const metricChartConfig = {
-  total_orders: { label: "订单", mode: "bucket", digits: 0 },
-  total_bet: { label: "下注", mode: "bucket", digits: 0 },
-  total_payout: { label: "派彩", mode: "bucket", digits: 0 },
-  total_profit: { label: "净赢", mode: "bucket", digits: 0 },
+  total_orders: { label: "订单", mode: "bucket", digits: 0, bucketStep: 5000 },
+  total_bet: { label: "下注", mode: "bucket", digits: 0, bucketStep: 5000 },
+  total_payout: { label: "派彩", mode: "bucket", digits: 0, bucketStep: 5000 },
+  total_profit: { label: "净赢", mode: "bucket", digits: 0, bucketStep: 500 },
   risk_score: { label: "Risk 分数", mode: "frequency", digits: 0, suffix: "分" },
-  rtp: { label: "RTP", mode: "bucket", digits: 1, suffix: "%" },
-  kill_rate: { label: "击杀率", mode: "bucket", digits: 1, suffix: "%" },
-  fish_2_bullet_share: { label: "2元鱼子弹占比", mode: "bucket", digits: 1, suffix: "%" },
+  rtp: { label: "RTP", mode: "bucket", digits: 1, suffix: "%", bucketStep: 5 },
+  kill_rate: { label: "击杀率", mode: "bucket", digits: 1, suffix: "%", bucketStep: 5 },
+  fish_2_bullet_share: { label: "2元鱼子弹占比", mode: "bucket", digits: 1, suffix: "%", bucketStep: 5 },
   active_duration_seconds: {
     label: "Active 具体",
     mode: "bucket",
     digits: 1,
     suffix: "小时",
+    bucketStep: 5,
     value: (user) => user.active_duration_seconds / 3600,
   },
   active_hours: {
@@ -62,6 +63,7 @@ const metricChartConfig = {
     mode: "bucket",
     digits: 1,
     suffix: "小时",
+    bucketStep: 5,
     value: (user) => user.active_duration_seconds / 3600,
   },
   ip_count: { label: "IP 数", mode: "frequency", digits: 0, suffix: "个 IP" },
@@ -271,58 +273,6 @@ function formatMetricValue(value, config) {
   return config.suffix ? `${formatted}${config.suffix}` : formatted;
 }
 
-function niceStep(rawStep) {
-  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
-  const exponent = Math.floor(Math.log10(rawStep));
-  const base = 10 ** exponent;
-  const fraction = rawStep / base;
-  if (fraction <= 1) return base;
-  if (fraction <= 2) return 2 * base;
-  if (fraction <= 5) return 5 * base;
-  return 10 * base;
-}
-
-function roundedBucketStep(rawStep, config) {
-  const step = niceStep(rawStep);
-  if (config.suffix === "%" && step < 5) return 5;
-  if (config.suffix === "小时") {
-    if (step < 1) return 1;
-    if (step <= 6) return Math.ceil(step);
-    if (step <= 24) return 24;
-  }
-  return step;
-}
-
-function roundedSplitPoint(start, end, config) {
-  const width = end - start;
-  if (!Number.isFinite(width) || width <= 0) return null;
-
-  let splitStep = niceStep(width / 2);
-  if (config.suffix === "%" && width >= 10 && splitStep < 5) {
-    splitStep = 5;
-  }
-  if (config.suffix === "小时") {
-    const hourSteps = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168, 336, 720, 1440, 2160];
-    splitStep = hourSteps.find((candidate) => candidate >= width / 3) || niceStep(width / 2);
-    if (splitStep >= width) {
-      splitStep = hourSteps.filter((candidate) => candidate < width).at(-1) || width / 2;
-    }
-  }
-  if (splitStep >= width) {
-    splitStep = niceStep(width / 3);
-  }
-
-  const target = start + width / 2;
-  const candidates = [
-    Math.round(target / splitStep) * splitStep,
-    Math.floor(target / splitStep) * splitStep,
-    Math.ceil(target / splitStep) * splitStep,
-    start + splitStep,
-    end - splitStep,
-  ];
-  return candidates.find((candidate) => candidate > start && candidate < end) || null;
-}
-
 function buildBucketChart(users, field, config) {
   const values = users.map((user) => getMetricValue(user, field, config)).filter((value) => Number.isFinite(value));
   if (!values.length) return [];
@@ -333,56 +283,20 @@ function buildBucketChart(users, field, config) {
     return [{ label: formatMetricValue(min, config), value: values.length }];
   }
 
-  const baseBucketCount = Math.min(7, Math.max(4, Math.ceil(Math.sqrt(values.length) / 2)));
-  const maxBucketCount = 14;
-  const denseThreshold = Math.max(8, Math.ceil(values.length * 0.16));
-  let step = roundedBucketStep((max - min) / baseBucketCount, config);
+  const step = config.bucketStep || 5;
   const roundedMin = Math.floor(min / step) * step;
   const roundedMax = Math.ceil(max / step) * step;
-  let bucketCount = Math.max(1, Math.round((roundedMax - roundedMin) / step));
-  while (bucketCount > baseBucketCount + 2) {
-    step = roundedBucketStep(step * 1.6, config);
-    bucketCount = Math.max(1, Math.ceil((roundedMax - roundedMin) / step));
-  }
+  const bucketCount = Math.max(1, Math.ceil((roundedMax - roundedMin) / step));
 
-  let buckets = Array.from({ length: bucketCount }, (_, index) => ({
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({
     start: roundedMin + step * index,
     end: roundedMin + step * (index + 1),
     value: 0,
   }));
 
-  function countBuckets(nextBuckets) {
-    for (const bucket of nextBuckets) {
-      bucket.value = 0;
-    }
-    for (const value of values) {
-      const index = nextBuckets.findIndex((bucket, bucketIndex) => {
-        const isLast = bucketIndex === nextBuckets.length - 1;
-        return value >= bucket.start && (value < bucket.end || (isLast && value <= bucket.end));
-      });
-      nextBuckets[Math.max(0, index)].value += 1;
-    }
-  }
-
-  countBuckets(buckets);
-  while (buckets.length < maxBucketCount) {
-    const candidateIndex = buckets.reduce((bestIndex, bucket, index) => {
-      const best = buckets[bestIndex];
-      if (bucket.value <= denseThreshold || bucket.end <= bucket.start) return bestIndex;
-      return bucket.value > best.value ? index : bestIndex;
-    }, 0);
-    const candidate = buckets[candidateIndex];
-    if (candidate.value <= denseThreshold || candidate.end <= candidate.start) break;
-
-    const midpoint = roundedSplitPoint(candidate.start, candidate.end, config);
-    if (midpoint === null) break;
-    buckets.splice(
-      candidateIndex,
-      1,
-      { start: candidate.start, end: midpoint, value: 0 },
-      { start: midpoint, end: candidate.end, value: 0 },
-    );
-    countBuckets(buckets);
+  for (const value of values) {
+    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((value - roundedMin) / step)));
+    buckets[index].value += 1;
   }
 
   return buckets.map(({ start, end, value }) => ({
