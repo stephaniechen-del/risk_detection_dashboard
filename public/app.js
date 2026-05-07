@@ -48,6 +48,7 @@ const metricChartConfig = {
   total_profit: { label: "净赢", mode: "bucket", digits: 0 },
   risk_score: { label: "Risk 分数", mode: "frequency", digits: 0, suffix: "分" },
   rtp: { label: "RTP", mode: "bucket", digits: 1, suffix: "%" },
+  kill_rate: { label: "击杀率", mode: "bucket", digits: 1, suffix: "%" },
   active_duration_seconds: {
     label: "Active 具体",
     mode: "bucket",
@@ -190,6 +191,7 @@ function renderTable() {
           <td class="${user.total_profit >= 0 ? "positive" : "negative"}">${formatNumber(user.total_profit, 2)}</td>
           <td>${formatNumber(user.risk_score)}</td>
           <td>${formatPercent(user.rtp)}</td>
+          <td>${formatPercent(user.kill_rate)}</td>
           <td>${escapeHtml(user.active_duration_exact || "")}</td>
           <td>${escapeHtml(user.active_duration_days_hours || "")}</td>
           <td>${formatNumber(user.ip_count)}</td>

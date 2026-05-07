@@ -129,6 +129,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         "payout",
         "profit",
         "fish_value",
+        "killed",
         "bullet_level",
         "multiplier",
         "ip",
@@ -169,6 +170,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         total_bet=("bet", "sum"),
         total_payout=("payout", "sum"),
         total_profit=("profit", "sum"),
+        total_killed=("killed", "sum"),
         ip_count=("ip", "nunique"),
         active_duration=("duration_td", "max"),
         first_event_time=("event_time", "min"),
@@ -178,7 +180,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     order_metrics["event_span_duration"] = event_span.where(event_span >= pd.Timedelta(0))
     grouped = all_users.join(order_metrics, how="left")
     grouped["total_orders"] = grouped["total_orders"].fillna(0).astype(int)
-    for column in ["total_bet", "total_payout", "total_profit", "ip_count"]:
+    for column in ["total_bet", "total_payout", "total_profit", "total_killed", "ip_count"]:
         grouped[column] = grouped[column].fillna(0)
     grouped["active_duration"] = (
         grouped["active_duration"]
@@ -187,6 +189,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     )
     grouped["active_duration_seconds"] = grouped["active_duration"].dt.total_seconds().fillna(0).astype(int)
     grouped["rtp"] = (grouped["total_payout"] / grouped["total_bet"] * 100).fillna(0)
+    grouped["kill_rate"] = (grouped["total_killed"] / grouped["total_orders"] * 100).fillna(0)
 
     ip_counts = orders.groupby(["user_id", "ip"], dropna=True).size().rename("count").reset_index()
     top_ip_counts = ip_counts.sort_values(["user_id", "count"], ascending=[True, False]).groupby("user_id").head(1)
@@ -284,6 +287,8 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
                 "total_bet": round(float(row["total_bet"]), 2),
                 "total_payout": round(float(row["total_payout"]), 2),
                 "total_profit": round(float(row["total_profit"]), 2),
+                "total_killed": int(row["total_killed"]),
+                "kill_rate": round(float(row["kill_rate"]), 2),
                 "rtp": round(float(row["rtp"]), 2),
                 "active_duration_exact": str(row["active_duration"]) if not pd.isna(row["active_duration"]) else "",
                 "active_duration_days_hours": format_duration_days_hours(row["active_duration"]),
