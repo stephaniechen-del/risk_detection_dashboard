@@ -38,7 +38,7 @@ const groupOrder = ["boost_pool", "dynamic_rtp_v2", "default"];
 const groupColors = {
   boost_pool: "#4b8f57",
   dynamic_rtp_v2: "#b79324",
-  default: "#1f6f78",
+  default: "#d26a2e",
 };
 
 const metricChartConfig = {
