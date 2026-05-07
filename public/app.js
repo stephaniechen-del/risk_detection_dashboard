@@ -26,6 +26,11 @@ const nodes = {
   dataMeta: document.querySelector("#dataMeta"),
   metricChartSelect: document.querySelector("#metricChartSelect"),
   metricChart: document.querySelector("#metricChart"),
+  groupHeaders: [
+    document.querySelector("#groupHeader0"),
+    document.querySelector("#groupHeader1"),
+    document.querySelector("#groupHeader2"),
+  ],
   userRows: document.querySelector("#userRows"),
   rtpChart: document.querySelector("#rtpChart"),
   ipChart: document.querySelector("#ipChart"),
@@ -56,6 +61,7 @@ const metricChartConfig = {
     value: (user) => user.active_duration_seconds / 3600,
   },
   ip_count: { label: "IP 数", mode: "frequency", digits: 0, suffix: "个 IP" },
+  group_user_counts: { label: "组人数", mode: "group-users", digits: 0 },
 };
 
 function setStatus(text, mode = "ready") {
@@ -154,14 +160,24 @@ function renderKpis() {
 
 function renderTable() {
   if (!state.filtered.length) {
-    nodes.userRows.innerHTML = `<tr><td colspan="12" class="empty-cell">没有符合当前条件的玩家</td></tr>`;
+    nodes.userRows.innerHTML = `<tr><td colspan="15" class="empty-cell">没有符合当前条件的玩家</td></tr>`;
     return;
   }
+
+  const groupColumns = (state.data.group_columns || []).slice(0, 3);
+  nodes.groupHeaders.forEach((header, index) => {
+    if (!header) return;
+    header.textContent = `${groupColumns[index] || `Group ${index + 1}`} 子弹`;
+  });
 
   nodes.userRows.innerHTML = state.filtered
     .map((user, index) => {
       const selected = user.user_id === state.selectedUserId ? "selected" : "";
       const reasons = user.risk_reasons.length ? user.risk_reasons : ["无 risk 信号"];
+      const groupCells = groupColumns
+        .map((group) => `<td>${renderGroupBulletBar(user.group_bullet_distribution?.[group])}</td>`)
+        .join("");
+      const emptyGroupCells = Array.from({ length: Math.max(0, 3 - groupColumns.length) }, () => "<td></td>").join("");
       return `
         <tr class="${selected}" data-user-id="${escapeHtml(user.user_id)}">
           <td class="rank-cell">${index + 1}</td>
@@ -178,11 +194,41 @@ function renderTable() {
             <div>${escapeHtml(user.top_ip)}</div>
             <small>${formatPercent(user.top_ip_share)}</small>
           </td>
+          ${groupCells}${emptyGroupCells}
           <td>${reasons.map((reason) => `<span class="chip">${escapeHtml(reason)}</span>`).join("")}</td>
         </tr>
       `;
     })
     .join("");
+}
+
+function renderGroupBulletBar(groupData) {
+  if (!groupData?.total) {
+    return '<span class="muted">0%</span>';
+  }
+
+  const bullets = groupData.bullets || [];
+  const segments = bullets
+    .map((bullet, index) => {
+      const width = Math.max(1, bullet.share);
+      return `
+        <i
+          style="width:${width}%;background:${colors[index % colors.length]}"
+          title="L${escapeHtml(bullet.name)} ${formatPercent(bullet.share)}"
+        ></i>
+      `;
+    })
+    .join("");
+  const labels = bullets
+    .map((bullet) => `<span>L${escapeHtml(bullet.name)} ${formatPercent(bullet.share)}</span>`)
+    .join("");
+
+  return `
+    <div class="group-bullet-cell">
+      <div class="group-progress">${segments}</div>
+      <div class="group-progress-labels">${labels}</div>
+    </div>
+  `;
 }
 
 function getMetricValue(user, field, config) {
@@ -330,9 +376,11 @@ function renderMetricChart() {
   const field = nodes.metricChartSelect.value;
   const config = metricChartConfig[field] || metricChartConfig.total_orders;
   const items =
-    config.mode === "frequency"
-      ? buildFrequencyChart(state.filtered, field, config)
-      : buildBucketChart(state.filtered, field, config);
+    config.mode === "group-users"
+      ? buildGroupUserChart()
+      : config.mode === "frequency"
+        ? buildFrequencyChart(state.filtered, field, config)
+        : buildBucketChart(state.filtered, field, config);
 
   nodes.metricChart.innerHTML = `
     <div class="metric-chart-header">
@@ -341,6 +389,14 @@ function renderMetricChart() {
     </div>
     <div class="chart compact-chart">${barRows(items, { digits: 0 })}</div>
   `;
+}
+
+function buildGroupUserChart() {
+  const configuredGroups = state.data.group_columns || [];
+  return configuredGroups.map((group) => {
+    const count = state.filtered.filter((user) => user.group_bullet_distribution?.[group]?.total > 0).length;
+    return { label: group, value: count };
+  });
 }
 
 function barRows(items, options = {}) {

@@ -28,7 +28,7 @@ def save_ip_cache(cache):
 
 
 def lookup_ip(ip, cache, delay_seconds=1.5):
-    if not ip or ip == "nan":
+    if not ip or str(ip).strip().lower() in {"unknown", "nan", "none", "null", "<na>"}:
         return "Unknown"
     if ip in cache:
         return cache[ip]
@@ -75,6 +75,22 @@ def time_bucket_counts(series):
     return [{"name": label, "count": int(counts.get(label, 0))} for label in labels]
 
 
+def normalize_ip(value):
+    if pd.isna(value):
+        return "Unknown"
+    ip = str(value).strip()
+    if not ip or ip.lower() in {"unknown", "nan", "none", "null", "<na>"}:
+        return "Unknown"
+    return ip
+
+
+def normalize_group(value):
+    if pd.isna(value):
+        return "unknown"
+    group = str(value).strip().lower()
+    return group or "unknown"
+
+
 def format_duration_days_hours(value):
     if pd.isna(value):
         return ""
@@ -114,6 +130,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         "ip",
         "event_timestamp",
         "data_date",
+        "group",
     ]
     df = pd.read_csv(source_path, usecols=lambda col: col in columns)
     for column in columns:
@@ -134,7 +151,11 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     all_users["account_duration_td"] = pd.to_timedelta(all_users["account_duration"], errors="coerce")
 
     orders = df.dropna(subset=["bet", "payout"]).copy()
-    orders["ip"] = orders["ip"].astype("string")
+    orders["ip"] = orders["ip"].map(normalize_ip)
+    orders["player_group"] = orders["group"].map(normalize_group)
+    orders.loc[orders["player_group"] == "unknown", "player_group"] = (
+        orders.loc[orders["player_group"] == "unknown", "strategy_name"].map(normalize_group)
+    )
     orders["duration_td"] = pd.to_timedelta(orders["duration"], errors="coerce")
     orders["event_time"] = pd.to_datetime(orders["event_timestamp"], errors="coerce")
     orders["bet_time_bucket"] = orders["event_time"].dt.hour.map(two_hour_bucket)
@@ -198,6 +219,18 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         for ip in ips_to_lookup:
             lookup_ip(ip, cache)
 
+    group_order_counts = orders["player_group"].value_counts()
+    preferred_groups = ["boost_pool", "dynamic_rtp_v2", "default"]
+    group_columns = [group for group in preferred_groups if group in group_order_counts.index]
+    for group in group_order_counts.index:
+        if group not in group_columns and len(group_columns) < 3:
+            group_columns.append(group)
+
+    group_user_counts = []
+    for group in group_columns:
+        count = orders.loc[orders["player_group"] == group, "user_id"].nunique()
+        group_user_counts.append({"name": group, "count": int(count)})
+
     users = []
     all_ip_counter = Counter()
     for user_id, row in grouped.iterrows():
@@ -216,6 +249,19 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
                     "share": pct(count, row["total_orders"]),
                 }
             )
+
+        group_bullet_distribution = {}
+        for group in group_columns:
+            group_orders = user_orders[user_orders["player_group"] == group]
+            group_total = len(group_orders)
+            bullet_counts = group_orders["bullet_level"].dropna().value_counts().sort_index()
+            group_bullet_distribution[group] = {
+                "total": int(group_total),
+                "bullets": [
+                    {"name": str(bullet), "count": int(count), "share": pct(count, group_total)}
+                    for bullet, count in bullet_counts.items()
+                ],
+            }
 
         users.append(
             {
@@ -237,6 +283,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
                 "default_risk": bool(row["is_default_risk"]),
                 "risk_reasons": risk_reasons(row),
                 "ip_distribution": ip_distribution,
+                "group_bullet_distribution": group_bullet_distribution,
                 "strategy_distribution": top_counts(user_orders["strategy_name"], 8),
                 "bullet_distribution": top_counts(user_orders["bullet_level"], 10),
                 "fish_distribution": top_counts(user_orders["fish_value"], 10),
@@ -252,6 +299,8 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         "user_count": int(df["user_id"].nunique()),
         "active_user_count": int(orders["user_id"].nunique()),
         "ip_count": int(orders["ip"].nunique()),
+        "group_columns": group_columns,
+        "group_user_counts": group_user_counts,
         "default_filters": {
             "min_orders": 0,
             "min_profit": 10000,
