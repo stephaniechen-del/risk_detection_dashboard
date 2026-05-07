@@ -34,6 +34,12 @@ const nodes = {
 };
 
 const colors = ["#1f6f78", "#d26a2e", "#4b8f57", "#8f5aa7", "#b79324", "#3688b8", "#c74f4f", "#5f6b74"];
+const groupOrder = ["boost_pool", "dynamic_rtp_v2", "default"];
+const groupColors = {
+  boost_pool: "#4b8f57",
+  dynamic_rtp_v2: "#b79324",
+  default: "#1f6f78",
+};
 
 const metricChartConfig = {
   total_orders: { label: "订单", mode: "bucket", digits: 0 },
@@ -159,7 +165,7 @@ function renderTable() {
     return;
   }
 
-  const groupColumns = (state.data.group_columns || []).slice(0, 3);
+  const groupColumns = getOrderedGroupColumns();
 
   nodes.userRows.innerHTML = state.filtered
     .map((user, index) => {
@@ -191,6 +197,17 @@ function renderTable() {
     .join("");
 }
 
+function getOrderedGroupColumns() {
+  const available = new Set(state.data.group_columns || []);
+  const ordered = groupOrder.filter((group) => available.has(group));
+  for (const group of state.data.group_columns || []) {
+    if (!ordered.includes(group) && ordered.length < 3) {
+      ordered.push(group);
+    }
+  }
+  return ordered.slice(0, 3);
+}
+
 function renderGroupMixBar(groupMix, groupColumns, shareKey) {
   const items = groupColumns.map((group) => ({
     group,
@@ -202,20 +219,21 @@ function renderGroupMixBar(groupMix, groupColumns, shareKey) {
   }
 
   const segments = visibleItems
-    .map((item, index) => {
+    .map((item) => {
       const width = Math.max(1, item.share);
+      const color = groupColors[item.group] || colors[0];
       return `
         <i
-          style="width:${width}%;background:${colors[index % colors.length]}"
+          style="width:${width}%;background:${color}"
           title="${escapeHtml(item.group)} ${formatPercent(item.share)}"
         ></i>
       `;
     })
     .join("");
   const labels = visibleItems
-    .map((item, index) => `
+    .map((item) => `
       <span>
-        <b style="background:${colors[index % colors.length]}"></b>
+        <b style="background:${groupColors[item.group] || colors[0]}"></b>
         ${escapeHtml(item.group)} ${formatPercent(item.share)}
       </span>
     `)
@@ -390,10 +408,10 @@ function renderMetricChart() {
 }
 
 function buildGroupUserChart() {
-  const configuredGroups = state.data.group_columns || [];
+  const configuredGroups = getOrderedGroupColumns();
   return configuredGroups.map((group) => {
     const count = state.filtered.filter((user) => user.group_mix?.[group]?.orders > 0).length;
-    return { label: group, value: count };
+    return { label: group, value: count, color: groupColors[group] || colors[0] };
   });
 }
 
@@ -405,7 +423,7 @@ function barRows(items, options = {}) {
       return `
         <div class="bar-row">
           <span title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
-          <div class="bar-track"><i style="width:${width}%;background:${colors[index % colors.length]}"></i></div>
+          <div class="bar-track"><i style="width:${width}%;background:${item.color || colors[index % colors.length]}"></i></div>
           <strong>${options.percent ? formatPercent(item.value) : formatNumber(item.value, options.digits || 0)}</strong>
         </div>
       `;
