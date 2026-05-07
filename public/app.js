@@ -46,6 +46,7 @@ const metricChartConfig = {
   total_bet: { label: "下注", mode: "bucket", digits: 0 },
   total_payout: { label: "派彩", mode: "bucket", digits: 0 },
   total_profit: { label: "净赢", mode: "bucket", digits: 0 },
+  risk_score: { label: "Risk 分数", mode: "frequency", digits: 0, suffix: "分" },
   rtp: { label: "RTP", mode: "bucket", digits: 1, suffix: "%" },
   active_duration_seconds: {
     label: "Active 具体",
@@ -187,6 +188,7 @@ function renderTable() {
           <td>${formatNumber(user.total_bet, 2)}</td>
           <td>${formatNumber(user.total_payout, 2)}</td>
           <td class="${user.total_profit >= 0 ? "positive" : "negative"}">${formatNumber(user.total_profit, 2)}</td>
+          <td>${formatNumber(user.risk_score)}</td>
           <td>${formatPercent(user.rtp)}</td>
           <td>${escapeHtml(user.active_duration_exact || "")}</td>
           <td>${escapeHtml(user.active_duration_days_hours || "")}</td>

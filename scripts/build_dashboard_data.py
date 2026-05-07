@@ -114,6 +114,10 @@ def risk_reasons(row):
     return reasons
 
 
+def risk_score_from_row(row):
+    return len(risk_reasons(row)) if row["total_orders"] > 0 else 0
+
+
 def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     columns = [
         "user_id",
@@ -191,12 +195,6 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     grouped["top_ip_share"] = grouped["top_ip_count"] / grouped["total_orders"] * 100
     grouped = grouped.fillna({"top_ip": "", "top_ip_count": 0, "top_ip_share": 0})
 
-    grouped["risk_score"] = (
-        (grouped["total_profit"].clip(lower=0) / 100)
-        + (grouped["ip_count"] * 10)
-        + ((86400 - grouped["active_duration_seconds"]).clip(lower=0) / 3600)
-        + (grouped["total_orders"].clip(upper=20000) / 1000)
-    )
     grouped["is_default_risk"] = (
         (grouped["total_orders"] > 0)
         & (
@@ -205,6 +203,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
             | (grouped["active_duration_seconds"] <= 86400)
         )
     )
+    grouped["risk_score"] = grouped.apply(risk_score_from_row, axis=1)
     grouped = grouped.sort_values(["is_default_risk", "risk_score", "total_profit"], ascending=False)
 
     cache = load_ip_cache()
