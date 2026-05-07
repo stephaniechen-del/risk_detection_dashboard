@@ -250,17 +250,30 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
                 }
             )
 
-        group_bullet_distribution = {}
+        group_mix = {}
+        user_total_orders = len(user_orders)
+        user_total_bet = float(user_orders["bet"].sum()) if not user_orders.empty else 0
+        group_stats = {}
         for group in group_columns:
             group_orders = user_orders[user_orders["player_group"] == group]
-            group_total = len(group_orders)
-            bullet_counts = group_orders["bullet_level"].dropna().value_counts().sort_index()
-            group_bullet_distribution[group] = {
-                "total": int(group_total),
-                "bullets": [
-                    {"name": str(bullet), "count": int(count), "share": pct(count, group_total)}
-                    for bullet, count in bullet_counts.items()
-                ],
+            group_order_count = len(group_orders)
+            group_bet = float(group_orders["bet"].sum()) if group_order_count else 0
+            group_profit = float(group_orders["profit"].sum()) if group_order_count else 0
+            group_stats[group] = {
+                "orders": group_order_count,
+                "bet": group_bet,
+                "profit": group_profit,
+            }
+
+        user_profit_denominator = sum(abs(stats["profit"]) for stats in group_stats.values())
+        for group, stats in group_stats.items():
+            group_mix[group] = {
+                "orders": int(stats["orders"]),
+                "bet": round(stats["bet"], 2),
+                "profit": round(stats["profit"], 2),
+                "order_share": pct(stats["orders"], user_total_orders),
+                "bet_share": pct(stats["bet"], user_total_bet),
+                "profit_share": pct(abs(stats["profit"]), user_profit_denominator),
             }
 
         users.append(
@@ -283,7 +296,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
                 "default_risk": bool(row["is_default_risk"]),
                 "risk_reasons": risk_reasons(row),
                 "ip_distribution": ip_distribution,
-                "group_bullet_distribution": group_bullet_distribution,
+                "group_mix": group_mix,
                 "strategy_distribution": top_counts(user_orders["strategy_name"], 8),
                 "bullet_distribution": top_counts(user_orders["bullet_level"], 10),
                 "fish_distribution": top_counts(user_orders["fish_value"], 10),

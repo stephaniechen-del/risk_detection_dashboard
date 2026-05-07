@@ -26,11 +26,6 @@ const nodes = {
   dataMeta: document.querySelector("#dataMeta"),
   metricChartSelect: document.querySelector("#metricChartSelect"),
   metricChart: document.querySelector("#metricChart"),
-  groupHeaders: [
-    document.querySelector("#groupHeader0"),
-    document.querySelector("#groupHeader1"),
-    document.querySelector("#groupHeader2"),
-  ],
   userRows: document.querySelector("#userRows"),
   rtpChart: document.querySelector("#rtpChart"),
   ipChart: document.querySelector("#ipChart"),
@@ -165,19 +160,11 @@ function renderTable() {
   }
 
   const groupColumns = (state.data.group_columns || []).slice(0, 3);
-  nodes.groupHeaders.forEach((header, index) => {
-    if (!header) return;
-    header.textContent = `${groupColumns[index] || `Group ${index + 1}`} 子弹`;
-  });
 
   nodes.userRows.innerHTML = state.filtered
     .map((user, index) => {
       const selected = user.user_id === state.selectedUserId ? "selected" : "";
       const reasons = user.risk_reasons.length ? user.risk_reasons : ["无 risk 信号"];
-      const groupCells = groupColumns
-        .map((group) => `<td>${renderGroupBulletBar(user.group_bullet_distribution?.[group])}</td>`)
-        .join("");
-      const emptyGroupCells = Array.from({ length: Math.max(0, 3 - groupColumns.length) }, () => "<td></td>").join("");
       return `
         <tr class="${selected}" data-user-id="${escapeHtml(user.user_id)}">
           <td class="rank-cell">${index + 1}</td>
@@ -194,7 +181,9 @@ function renderTable() {
             <div>${escapeHtml(user.top_ip)}</div>
             <small>${formatPercent(user.top_ip_share)}</small>
           </td>
-          ${groupCells}${emptyGroupCells}
+          <td>${renderGroupMixBar(user.group_mix, groupColumns, "order_share")}</td>
+          <td>${renderGroupMixBar(user.group_mix, groupColumns, "profit_share")}</td>
+          <td>${renderGroupMixBar(user.group_mix, groupColumns, "bet_share")}</td>
           <td>${reasons.map((reason) => `<span class="chip">${escapeHtml(reason)}</span>`).join("")}</td>
         </tr>
       `;
@@ -202,29 +191,38 @@ function renderTable() {
     .join("");
 }
 
-function renderGroupBulletBar(groupData) {
-  if (!groupData?.total) {
+function renderGroupMixBar(groupMix, groupColumns, shareKey) {
+  const items = groupColumns.map((group) => ({
+    group,
+    share: Number(groupMix?.[group]?.[shareKey] || 0),
+  }));
+  const visibleItems = items.filter((item) => item.share > 0);
+  if (!visibleItems.length) {
     return '<span class="muted">0%</span>';
   }
 
-  const bullets = groupData.bullets || [];
-  const segments = bullets
-    .map((bullet, index) => {
-      const width = Math.max(1, bullet.share);
+  const segments = visibleItems
+    .map((item, index) => {
+      const width = Math.max(1, item.share);
       return `
         <i
           style="width:${width}%;background:${colors[index % colors.length]}"
-          title="L${escapeHtml(bullet.name)} ${formatPercent(bullet.share)}"
+          title="${escapeHtml(item.group)} ${formatPercent(item.share)}"
         ></i>
       `;
     })
     .join("");
-  const labels = bullets
-    .map((bullet) => `<span>L${escapeHtml(bullet.name)} ${formatPercent(bullet.share)}</span>`)
+  const labels = visibleItems
+    .map((item, index) => `
+      <span>
+        <b style="background:${colors[index % colors.length]}"></b>
+        ${escapeHtml(item.group)} ${formatPercent(item.share)}
+      </span>
+    `)
     .join("");
 
   return `
-    <div class="group-bullet-cell">
+    <div class="group-mix-cell">
       <div class="group-progress">${segments}</div>
       <div class="group-progress-labels">${labels}</div>
     </div>
@@ -394,7 +392,7 @@ function renderMetricChart() {
 function buildGroupUserChart() {
   const configuredGroups = state.data.group_columns || [];
   return configuredGroups.map((group) => {
-    const count = state.filtered.filter((user) => user.group_bullet_distribution?.[group]?.total > 0).length;
+    const count = state.filtered.filter((user) => user.group_mix?.[group]?.orders > 0).length;
     return { label: group, value: count };
   });
 }

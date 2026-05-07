@@ -386,10 +386,10 @@ small {
   white-space: nowrap;
 }
 
-.group-bullet-cell {
+.group-mix-cell {
   display: grid;
   gap: 6px;
-  min-width: 190px;
+  min-width: 230px;
 }
 
 .group-progress {
@@ -412,6 +412,14 @@ small {
   color: var(--muted);
   font-size: 11px;
   line-height: 1.2;
+}
+
+.group-progress-labels b {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  margin-right: 4px;
 }
 
 .empty-cell,
