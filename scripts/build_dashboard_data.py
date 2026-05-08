@@ -111,8 +111,8 @@ def risk_reasons(row):
         reasons.append("IP 数 > 6 (+2)")
     elif row["ip_count"] > 3:
         reasons.append("IP 数 > 3")
-    if row["active_duration_seconds"] <= 43200:
-        reasons.append("Active 时间 <= 0.5天")
+    if row["active_duration_seconds"] <= 86400:
+        reasons.append("Active 时间 <= 1天 (+0.5)")
     if row["kill_rate"] > 50:
         reasons.append("击杀率 > 50%")
     if row["fish_2_bullet_share"] >= 100:
@@ -130,8 +130,8 @@ def risk_score_from_row(row):
         score += 2
     elif row["ip_count"] > 3:
         score += 1
-    if row["active_duration_seconds"] <= 43200:
-        score += 1
+    if row["active_duration_seconds"] <= 86400:
+        score += 0.5
     if row["kill_rate"] > 50:
         score += 1
     if row["fish_2_bullet_share"] >= 100:
@@ -226,7 +226,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         & (
             (grouped["total_profit"] > 10000)
             | (grouped["ip_count"] > 3)
-            | (grouped["active_duration_seconds"] <= 43200)
+            | (grouped["active_duration_seconds"] <= 86400)
             | (grouped["kill_rate"] > 50)
             | (grouped["fish_2_bullet_share"] >= 100)
         )
