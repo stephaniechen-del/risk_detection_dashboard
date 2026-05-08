@@ -1,6 +1,6 @@
 # Risk Detection Dashboard
 
-一个用于识别和复盘 risk 玩家行为的 dashboard。上传订单 CSV 后，系统会按 `user_id` 聚合投注、派彩、净赢、RTP、active 时间、IP 分布、策略、子弹等级、鱼值和投注时段，并生成可筛选、可排序、可点击查看玩家明细的页面。
+一个用于识别 risk 玩家行为的 dashboard。上传订单 CSV 后，系统会按 `user_id` 聚合投注、派彩、净赢、RTP、active 时间、IP 分布、策略、子弹等级、鱼值和投注时段，并生成可筛选、可排序、可点击查看玩家明细的页面。
 
 ## 启动
 
