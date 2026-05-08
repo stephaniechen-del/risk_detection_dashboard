@@ -107,15 +107,36 @@ def risk_reasons(row):
         return reasons
     if row["total_profit"] > 10000:
         reasons.append("玩家净赢 > 10,000")
-    if row["ip_count"] > 5:
-        reasons.append("IP 数 > 5")
-    if row["active_duration_seconds"] <= 86400:
-        reasons.append("Active 时间 <= 1天")
+    if row["ip_count"] > 6:
+        reasons.append("IP 数 > 6 (+2)")
+    elif row["ip_count"] > 3:
+        reasons.append("IP 数 > 3")
+    if row["active_duration_seconds"] <= 43200:
+        reasons.append("Active 时间 <= 0.5天")
+    if row["kill_rate"] > 50:
+        reasons.append("击杀率 > 50%")
+    if row["fish_2_bullet_share"] >= 100:
+        reasons.append("全打2元鱼")
     return reasons
 
 
 def risk_score_from_row(row):
-    return len(risk_reasons(row)) if row["total_orders"] > 0 else 0
+    if row["total_orders"] == 0:
+        return 0
+    score = 0
+    if row["total_profit"] > 10000:
+        score += 1
+    if row["ip_count"] > 6:
+        score += 2
+    elif row["ip_count"] > 3:
+        score += 1
+    if row["active_duration_seconds"] <= 43200:
+        score += 1
+    if row["kill_rate"] > 50:
+        score += 1
+    if row["fish_2_bullet_share"] >= 100:
+        score += 1
+    return score
 
 
 def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
@@ -204,8 +225,10 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         (grouped["total_orders"] > 0)
         & (
             (grouped["total_profit"] > 10000)
-            | (grouped["ip_count"] > 5)
-            | (grouped["active_duration_seconds"] <= 86400)
+            | (grouped["ip_count"] > 3)
+            | (grouped["active_duration_seconds"] <= 43200)
+            | (grouped["kill_rate"] > 50)
+            | (grouped["fish_2_bullet_share"] >= 100)
         )
     )
     grouped["risk_score"] = grouped.apply(risk_score_from_row, axis=1)
