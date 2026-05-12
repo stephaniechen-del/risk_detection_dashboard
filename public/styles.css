@@ -40,6 +40,7 @@ select {
 
 .page-header,
 .upload-panel,
+.redshift-panel,
 .controls,
 .kpis,
 .panel {
@@ -54,11 +55,140 @@ select {
   padding: 16px;
 }
 
+.redshift-panel {
+  margin-top: 16px;
+  overflow: hidden;
+}
+
 .upload-panel form {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(190px, auto) minmax(220px, auto) minmax(260px, 1.2fr);
   align-items: end;
   gap: 14px;
+}
+
+.panel-header.compact {
+  padding: 14px 16px;
+}
+
+.panel-header .working {
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+
+.panel-header .error,
+.error-text {
+  color: var(--bad);
+  font-weight: 800;
+}
+
+.redshift-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+  gap: 14px;
+  padding: 16px;
+}
+
+.redshift-form button {
+  width: 100%;
+}
+
+.redshift-bulk {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 0.35fr) minmax(240px, auto);
+  align-items: end;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding: 0 16px 16px;
+}
+
+.redshift-bulk textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 11px;
+  font: inherit;
+  color: var(--ink);
+  outline: none;
+}
+
+.redshift-bulk textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(31, 111, 120, 0.14);
+}
+
+.redshift-bulk button {
+  width: 100%;
+}
+
+.redshift-result {
+  border-top: 1px solid var(--line);
+  padding: 16px;
+  color: var(--muted);
+}
+
+.redshift-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.redshift-aggregate-panel {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  color: var(--ink);
+}
+
+.redshift-aggregate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.redshift-aggregate-grid article {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.redshift-aggregate-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.redshift-aggregate-grid strong {
+  font-size: 20px;
+}
+
+.redshift-table-wrap {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.redshift-table-wrap table {
+  min-width: 920px;
+}
+
+.redshift-table-wrap td,
+.redshift-table-wrap th {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page-header {
@@ -327,6 +457,40 @@ th {
   color: #4f5d68;
   font-size: 12px;
   text-transform: uppercase;
+}
+
+th.sticky-rank,
+td.sticky-rank {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 52px;
+  min-width: 52px;
+  background: #ffffff;
+}
+
+th.sticky-user,
+td.sticky-user {
+  position: sticky;
+  left: 52px;
+  z-index: 2;
+  width: 150px;
+  min-width: 150px;
+  background: #ffffff;
+  box-shadow: 1px 0 0 var(--line);
+}
+
+th.sticky-rank,
+th.sticky-user {
+  z-index: 3;
+  background: #f8fafb;
+}
+
+tr:hover td.sticky-rank,
+tr:hover td.sticky-user,
+tr.selected td.sticky-rank,
+tr.selected td.sticky-user {
+  background: #eef6f7;
 }
 
 tr {

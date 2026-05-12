@@ -9,9 +9,15 @@ const nodes = {
   status: document.querySelector("#status"),
   uploadForm: document.querySelector("#uploadForm"),
   dataFile: document.querySelector("#dataFile"),
+  uploadGameType: document.querySelector("#uploadGameType"),
   lookupIps: document.querySelector("#lookupIps"),
   uploadButton: document.querySelector("#uploadButton"),
   uploadStatus: document.querySelector("#uploadStatus"),
+  redshiftBulkUserIds: document.querySelector("#redshiftBulkUserIds"),
+  redshiftBulkGameType: document.querySelector("#redshiftBulkGameType"),
+  redshiftBulkButton: document.querySelector("#redshiftBulkButton"),
+  redshiftStatus: document.querySelector("#redshiftStatus"),
+  redshiftResult: document.querySelector("#redshiftResult"),
   minOrders: document.querySelector("#minOrders"),
   minProfit: document.querySelector("#minProfit"),
   minIpCount: document.querySelector("#minIpCount"),
@@ -96,6 +102,18 @@ function escapeHtml(value) {
     const map = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
     return map[character];
   });
+}
+
+function setRedshiftStatus(text, mode = "ready") {
+  nodes.redshiftStatus.textContent = text;
+  nodes.redshiftStatus.className = mode;
+}
+
+function parseUserIds(value) {
+  return value
+    .split(/[\s,，]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function currentFilters() {
@@ -186,8 +204,8 @@ function renderTable() {
       const reasons = user.risk_reasons.length ? user.risk_reasons : ["无 risk 信号"];
       return `
         <tr class="${selected}" data-user-id="${escapeHtml(user.user_id)}">
-          <td class="rank-cell">${index + 1}</td>
-          <td><button class="link-button" type="button">${escapeHtml(user.user_id)}</button></td>
+          <td class="rank-cell sticky-rank">${index + 1}</td>
+          <td class="sticky-user"><button class="link-button" type="button">${escapeHtml(user.user_id)}</button></td>
           <td>${formatNumber(user.total_orders)}</td>
           <td>${formatNumber(user.total_bet, 2)}</td>
           <td>${formatNumber(user.total_payout, 2)}</td>
@@ -473,6 +491,7 @@ async function uploadDashboardData(event) {
 
   const formData = new FormData();
   formData.append("dataFile", file);
+  formData.append("gameType", nodes.uploadGameType.value);
   if (nodes.lookupIps.checked) {
     formData.append("lookupIps", "on");
   }
@@ -494,7 +513,15 @@ async function uploadDashboardData(event) {
     state.selectedUserId = null;
     nodes.dataMeta.textContent = `${formatNumber(state.data.user_count)} users · ${formatNumber(state.data.ip_count)} IPs`;
     setStatus("已连接");
-    setUploadStatus(`已加载 ${file.name}：${formatNumber(state.data.user_count)} users，${formatNumber(state.data.order_count)} orders。`);
+    if (payload.prepared?.mode === "redshift_fallback") {
+      setUploadStatus(
+        `CSV 缺少 ${payload.prepared.missing_columns.join(", ")}，已从 Redshift 补全 ${formatNumber(
+          payload.prepared.user_count,
+        )} users / ${formatNumber(payload.prepared.redshift_rows)} rows。`,
+      );
+    } else {
+      setUploadStatus(`已加载 ${file.name}：${formatNumber(state.data.user_count)} users，${formatNumber(state.data.order_count)} orders。`);
+    }
     applyFilters();
   } catch (error) {
     setStatus("上传失败", "error");
@@ -504,9 +531,95 @@ async function uploadDashboardData(event) {
   }
 }
 
+async function queryRedshiftBulkUsers() {
+  const userIds = parseUserIds(nodes.redshiftBulkUserIds.value);
+  const gameType = nodes.redshiftBulkGameType.value;
+  if (!userIds.length) {
+    setRedshiftStatus("请输入至少一个 user_id", "error");
+    return;
+  }
+
+  try {
+    nodes.redshiftBulkButton.disabled = true;
+    setRedshiftStatus("批量查询中", "working");
+    nodes.redshiftResult.textContent = `正在查询 ${formatNumber(userIds.length)} users / ${gameType}...`;
+    const response = await fetch("/api/redshift-users-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userIds, gameType }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "Redshift 批量查询失败");
+    }
+
+    state.data = payload.dashboard;
+    state.selectedUserId = payload.dashboard.users[0]?.user_id || null;
+    nodes.dataMeta.textContent = `Redshift ${gameType} · ${formatNumber(state.data.user_count)} users · ${formatNumber(state.data.ip_count)} IPs`;
+    setStatus("Redshift 已加载");
+    setRedshiftStatus(`${formatNumber(payload.prepared.redshift_rows)} rows`, "ready");
+    nodes.redshiftResult.innerHTML = `
+      <div class="redshift-summary">
+        <strong>${escapeHtml(gameType)} 批量查询</strong>
+        <span>${formatNumber(payload.prepared.user_count)} users · ${formatNumber(payload.prepared.redshift_rows)} rows</span>
+      </div>
+      <p class="muted">已加载到下方 dashboard。</p>
+    `;
+    applyFilters();
+  } catch (error) {
+    setRedshiftStatus("查询失败", "error");
+    nodes.redshiftResult.innerHTML = `<p class="error-text">${escapeHtml(error.message)}</p>`;
+  } finally {
+    nodes.redshiftBulkButton.disabled = false;
+  }
+}
+
+function renderRedshiftResult(payload) {
+  const dashboardHtml = renderRedshiftDashboardSummary(payload.dashboard);
+
+  if (!payload.row_count) {
+    nodes.redshiftResult.innerHTML = `
+      <p class="muted">bullet 中没有找到 user_id=${escapeHtml(payload.user_id)} 的记录。</p>
+    `;
+    return;
+  }
+
+  nodes.redshiftResult.innerHTML = `
+    <div class="redshift-summary">
+      <strong>${escapeHtml(payload.table)}</strong>
+      <span>user_id=${escapeHtml(payload.user_id)} · ${escapeHtml(payload.game_type || "")} · ${formatNumber(payload.row_count)} rows</span>
+    </div>
+    <p class="muted">currency_type=CNY · op_code not in B26, TST, TSB, TSO</p>
+    ${dashboardHtml}
+  `;
+}
+
+function renderRedshiftDashboardSummary(dashboard) {
+  const user = dashboard?.users?.[0];
+  if (!user) {
+    return "";
+  }
+  return `
+    <section class="redshift-aggregate-panel">
+      <h3>Redshift 行为聚合</h3>
+      <div class="redshift-aggregate-grid">
+        <article><span>订单</span><strong>${formatNumber(user.total_orders)}</strong></article>
+        <article><span>下注</span><strong>${formatNumber(user.total_bet, 2)}</strong></article>
+        <article><span>派彩</span><strong>${formatNumber(user.total_payout, 2)}</strong></article>
+        <article><span>净赢</span><strong>${formatNumber(user.total_profit, 2)}</strong></article>
+        <article><span>RTP</span><strong>${formatPercent(user.rtp)}</strong></article>
+        <article><span>Risk 分数</span><strong>${formatRiskScore(user.risk_score)}</strong></article>
+        <article><span>IP 数</span><strong>${formatNumber(user.ip_count)}</strong></article>
+        <article><span>击杀率</span><strong>${formatPercent(user.kill_rate)}</strong></article>
+      </div>
+    </section>
+  `;
+}
+
 document.querySelector(".controls").addEventListener("input", applyFilters);
 document.querySelector(".controls").addEventListener("change", applyFilters);
 nodes.uploadForm.addEventListener("submit", uploadDashboardData);
+nodes.redshiftBulkButton.addEventListener("click", queryRedshiftBulkUsers);
 nodes.metricChartSelect.addEventListener("change", renderMetricChart);
 nodes.userRows.addEventListener("click", (event) => {
   const row = event.target.closest("tr[data-user-id]");

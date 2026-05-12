@@ -1,9 +1,45 @@
 const http = require("node:http");
 const { execFile } = require("node:child_process");
 const { createWriteStream } = require("node:fs");
-const { readFile, mkdir } = require("node:fs/promises");
+const { readFile, mkdir, writeFile } = require("node:fs/promises");
 const { promisify } = require("node:util");
 const path = require("node:path");
+
+function loadEnvFile(envPath) {
+  try {
+    const raw = require("node:fs").readFileSync(envPath, "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const separator = trimmed.indexOf("=");
+      if (separator === -1) continue;
+      const key = trimmed.slice(0, separator).trim();
+      let value = trimmed.slice(separator + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (key && process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.warn(`Failed to load ${envPath}:`, error.message);
+    }
+  }
+}
+
+function loadDotEnv() {
+  const envPaths = [
+    path.join(__dirname, ".env"),
+    "/Users/stephaniechen/Documents/Playground/weekly_report_dashboard_share/.env",
+  ];
+  for (const envPath of envPaths) {
+    loadEnvFile(envPath);
+  }
+}
+
+loadDotEnv();
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -12,6 +48,8 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
 const DASHBOARD_DATA_FILE = path.join(DATA_DIR, "risk-dashboard.json");
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+const REDSHIFT_DIR = path.join(DATA_DIR, "redshift");
+const PREPARED_UPLOAD_DIR = path.join(DATA_DIR, "prepared-uploads");
 const execFileAsync = promisify(execFile);
 
 const MIME_TYPES = {
@@ -29,6 +67,44 @@ function sendJson(res, statusCode, payload) {
 
 function sendError(res, statusCode, message) {
   sendJson(res, statusCode, { error: message });
+}
+
+function formatChildProcessError(error) {
+  const detail = String(error.stderr || error.message || "").trim();
+  if (!detail) {
+    return "未知错误";
+  }
+  const lines = detail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const valueError = [...lines].reverse().find((line) => line.startsWith("ValueError:"));
+  if (valueError) {
+    return valueError.replace(/^ValueError:\s*/, "");
+  }
+  return lines.at(-1) || detail;
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1024 * 1024) {
+      const error = new Error("请求内容过大。");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+
+  if (!chunks.length) {
+    return {};
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    const error = new Error("请求 JSON 格式不正确。");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 async function writeChunk(stream, chunk) {
@@ -209,6 +285,118 @@ async function rebuildDashboard(sourcePath, lookupIps) {
   });
 }
 
+async function prepareDashboardSource(uploadPath, gameType = "FM01") {
+  await mkdir(PREPARED_UPLOAD_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeGameType = safeFilePart(gameType);
+  const outputPath = path.join(PREPARED_UPLOAD_DIR, `${stamp}-${safeGameType}-redshift-fallback.csv`);
+  const { stdout } = await execFileAsync(
+    "python3",
+    [
+      path.join(ROOT, "scripts/prepare_dashboard_source.py"),
+      "--source",
+      uploadPath,
+      "--output",
+      outputPath,
+      "--game-type",
+      gameType,
+    ],
+    {
+      cwd: ROOT,
+      env: process.env,
+      maxBuffer: 1024 * 1024 * 16,
+    },
+  );
+  return JSON.parse(stdout);
+}
+
+function safeFilePart(value) {
+  return String(value).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120) || "user";
+}
+
+async function queryRedshiftUserRecords(userId, gameType) {
+  await mkdir(REDSHIFT_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeUser = safeFilePart(userId);
+  const safeGameType = safeFilePart(gameType);
+  const outputCsv = path.join(REDSHIFT_DIR, `${stamp}-${safeUser}-${safeGameType}.csv`);
+  const dashboardOutput = path.join(REDSHIFT_DIR, `${stamp}-${safeUser}-dashboard.json`);
+  const args = [path.join(ROOT, "scripts/query_redshift_user.py"), "--user-id", userId, "--game-type", gameType];
+  args.push("--output-csv", outputCsv, "--dashboard-output", dashboardOutput);
+
+  const { stdout } = await execFileAsync("python3", args, {
+    cwd: ROOT,
+    env: process.env,
+    maxBuffer: 1024 * 1024 * 64,
+  });
+  return JSON.parse(stdout);
+}
+
+async function queryRedshiftUsers(userIds, gameType) {
+  await mkdir(REDSHIFT_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeGameType = safeFilePart(gameType);
+  const userListPath = path.join(REDSHIFT_DIR, `${stamp}-${safeGameType}-users.csv`);
+  const outputCsv = path.join(REDSHIFT_DIR, `${stamp}-${safeGameType}-records.csv`);
+  const dashboardOutput = path.join(REDSHIFT_DIR, `${stamp}-${safeGameType}-dashboard.json`);
+  const userCsv = `user_id\n${userIds.map((userId) => String(userId).replace(/\r?\n/g, "")).join("\n")}\n`;
+  await writeFile(userListPath, userCsv, "utf8");
+
+  const { stdout } = await execFileAsync(
+    "python3",
+    [
+      path.join(ROOT, "scripts/prepare_dashboard_source.py"),
+      "--source",
+      userListPath,
+      "--output",
+      outputCsv,
+      "--force-redshift",
+      "--game-type",
+      gameType,
+    ],
+    {
+      cwd: ROOT,
+      env: process.env,
+      maxBuffer: 1024 * 1024 * 16,
+    },
+  );
+  const prepared = JSON.parse(stdout);
+  if (!prepared.redshift_rows) {
+    return {
+      prepared,
+      dashboard: {
+        generated_at: new Date().toISOString(),
+        source_file: prepared.source_path,
+        order_count: 0,
+        user_count: 0,
+        active_user_count: 0,
+        ip_count: 0,
+        group_columns: [],
+        group_user_counts: [],
+        default_filters: {
+          min_orders: 0,
+          min_profit: 10000,
+          min_ip_count: 5,
+          max_active_hours: 24,
+          min_top_ip_share: 0,
+        },
+        ip_lookup: {
+          provider: "ip-api.com",
+          language: "zh-CN",
+          looked_up_count: 0,
+          cached_count: 0,
+        },
+        top_ips: [],
+        users: [],
+      },
+    };
+  }
+  await rebuildDashboard(prepared.source_path, false);
+  const dashboard = JSON.parse(await readFile(DASHBOARD_DATA_FILE, "utf8"));
+  await writeFile(dashboardOutput, JSON.stringify(dashboard, null, 2) + "\n", "utf8");
+  return { prepared, dashboard };
+}
+
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/health" && req.method === "GET") {
     sendJson(res, 200, { ok: true });
@@ -242,16 +430,57 @@ async function handleApi(req, res, url) {
     }
 
     try {
-      await rebuildDashboard(upload.savedPath, fields.lookupIps === "on");
+      const gameType = String(fields.gameType || "FM01").trim().toUpperCase();
+      const prepared = await prepareDashboardSource(upload.savedPath, gameType);
+      await rebuildDashboard(prepared.source_path, fields.lookupIps === "on");
       const raw = await readFile(DASHBOARD_DATA_FILE, "utf8");
       sendJson(res, 200, {
         ok: true,
         filename: upload.filename,
         savedPath: upload.savedPath,
+        prepared,
         dashboard: JSON.parse(raw),
       });
     } catch (error) {
       sendError(res, 400, `数据处理失败：${error.stderr || error.message}`);
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/redshift-user-records" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const userId = String(body.userId || "").trim();
+    const gameType = String(body.gameType || "FM01").trim().toUpperCase();
+    if (!userId) {
+      sendError(res, 400, "请输入 user_id。");
+      return;
+    }
+
+    try {
+      const payload = await queryRedshiftUserRecords(userId, gameType);
+      sendJson(res, 200, payload);
+    } catch (error) {
+      sendError(res, 400, `Redshift 查询失败：${formatChildProcessError(error)}`);
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/redshift-users-dashboard" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const gameType = String(body.gameType || "FM01").trim().toUpperCase();
+    const userIds = Array.isArray(body.userIds)
+      ? body.userIds.map((userId) => String(userId).trim()).filter(Boolean)
+      : [];
+    if (!userIds.length) {
+      sendError(res, 400, "请输入至少一个 user_id。");
+      return;
+    }
+
+    try {
+      const payload = await queryRedshiftUsers([...new Set(userIds)], gameType);
+      sendJson(res, 200, payload);
+    } catch (error) {
+      sendError(res, 400, `Redshift 批量查询失败：${formatChildProcessError(error)}`);
     }
     return;
   }

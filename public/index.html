@@ -22,6 +22,15 @@
             上传数据 CSV
             <input id="dataFile" name="dataFile" type="file" accept=".csv,text/csv" />
           </label>
+          <label>
+            上传 Game Type
+            <select id="uploadGameType" name="gameType">
+              <option value="FM01">FM01</option>
+              <option value="SS01">SS01</option>
+              <option value="SS02">SS02</option>
+              <option value="SS03">SS03</option>
+            </select>
+          </label>
           <label class="check-field">
             <input id="lookupIps" name="lookupIps" type="checkbox" />
             <span>上传后解析 risk IP 地区</span>
@@ -29,6 +38,30 @@
           <button id="uploadButton" type="submit">上传并生成 Dashboard</button>
           <span id="uploadStatus" class="upload-status">支持包含 user_id、bet、payout、profit、ip、duration、event_timestamp 的 CSV</span>
         </form>
+      </section>
+
+      <section class="redshift-panel" aria-label="Redshift user 查询">
+        <div class="panel-header compact">
+          <h2>Redshift bullet 查询</h2>
+          <span id="redshiftStatus">CNY · 排除 B26/TST/TSB/TSO</span>
+        </div>
+        <div class="redshift-bulk">
+          <label>
+            User ID（可用逗号分隔多个一起查询）
+            <textarea id="redshiftBulkUserIds" rows="3" placeholder="101,102,103"></textarea>
+          </label>
+          <label>
+            Batch Game Type
+            <select id="redshiftBulkGameType">
+              <option value="FM01">FM01</option>
+              <option value="SS01">SS01</option>
+              <option value="SS02">SS02</option>
+              <option value="SS03">SS03</option>
+            </select>
+          </label>
+          <button id="redshiftBulkButton" type="button">批量查询并生成 Dashboard</button>
+        </div>
+        <div id="redshiftResult" class="redshift-result">暂无查询结果</div>
       </section>
 
       <section class="controls" aria-label="risk 过滤条件">
@@ -126,8 +159,8 @@
             <table>
               <thead>
                 <tr>
-                  <th>#</th>
-                  <th>User ID</th>
+                  <th class="sticky-rank">#</th>
+                  <th class="sticky-user">User ID</th>
                   <th>订单</th>
                   <th>下注</th>
                   <th>派彩</th>

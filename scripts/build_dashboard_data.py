@@ -81,6 +81,11 @@ def normalize_ip(value):
     ip = str(value).strip()
     if not ip or ip.lower() in {"unknown", "nan", "none", "null", "<na>"}:
         return "Unknown"
+    parts = ip.split(".")
+    if len(parts) == 5 and len(parts[0]) == 2 and all(part.isdigit() for part in parts):
+        return ".".join(parts[1:])
+    if len(parts) == 4 and parts[0] == "39" and all(part.isdigit() for part in parts):
+        return ".".join(parts[1:])
     return ip
 
 
@@ -139,7 +144,7 @@ def risk_score_from_row(row):
     return score
 
 
-def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
+def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120, output_path=OUTPUT_PATH):
     columns = [
         "user_id",
         "user_name",
@@ -178,10 +183,11 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
 
     orders = df.dropna(subset=["bet", "payout"]).copy()
     orders["ip"] = orders["ip"].map(normalize_ip)
-    orders["player_group"] = orders["group"].map(normalize_group)
-    orders.loc[orders["player_group"] == "unknown", "player_group"] = (
-        orders.loc[orders["player_group"] == "unknown", "strategy_name"].map(normalize_group)
-    )
+    orders["player_group"] = orders["strategy_name"].map(normalize_group)
+    if "group" in orders.columns:
+        orders.loc[orders["player_group"] == "unknown", "player_group"] = (
+            orders.loc[orders["player_group"] == "unknown", "group"].map(normalize_group)
+        )
     orders["duration_td"] = pd.to_timedelta(orders["duration"], errors="coerce")
     orders["event_time"] = pd.to_datetime(orders["event_timestamp"], errors="coerce")
     orders["bet_time_bucket"] = orders["event_time"].dt.hour.map(two_hour_bucket)
@@ -194,7 +200,6 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         total_killed=("killed", "sum"),
         fish_2_orders=("fish_value", lambda values: int((values == 2).sum())),
         ip_count=("ip", "nunique"),
-        active_duration=("duration_td", "max"),
         first_event_time=("event_time", "min"),
         last_event_time=("event_time", "max"),
     )
@@ -204,11 +209,7 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
     grouped["total_orders"] = grouped["total_orders"].fillna(0).astype(int)
     for column in ["total_bet", "total_payout", "total_profit", "total_killed", "fish_2_orders", "ip_count"]:
         grouped[column] = grouped[column].fillna(0)
-    grouped["active_duration"] = (
-        grouped["active_duration"]
-        .fillna(grouped["account_duration_td"])
-        .fillna(grouped["event_span_duration"])
-    )
+    grouped["active_duration"] = grouped["event_span_duration"].fillna(pd.Timedelta(0))
     grouped["active_duration_seconds"] = grouped["active_duration"].dt.total_seconds().fillna(0).astype(int)
     grouped["rtp"] = (grouped["total_payout"] / grouped["total_bet"] * 100).fillna(0)
     grouped["kill_rate"] = (grouped["total_killed"] / grouped["total_orders"] * 100).fillna(0)
@@ -365,19 +366,21 @@ def build_dashboard(source_path, lookup_locations=False, max_lookup_ips=120):
         "users": users,
     }
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf8")
     return payload
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build risk-player dashboard data from df_output.csv.")
     parser.add_argument("--source", default=DEFAULT_SOURCE)
+    parser.add_argument("--output", default=str(OUTPUT_PATH))
     parser.add_argument("--lookup-ips", action="store_true", help="Use ip-api.com to resolve risk-player IP locations.")
     parser.add_argument("--max-lookup-ips", type=int, default=120)
     args = parser.parse_args()
 
-    payload = build_dashboard(args.source, args.lookup_ips, args.max_lookup_ips)
+    payload = build_dashboard(args.source, args.lookup_ips, args.max_lookup_ips, args.output)
     print(
         f"Built {OUTPUT_PATH} with {payload['user_count']} users, "
         f"{payload['order_count']} orders, {payload['ip_count']} IPs."

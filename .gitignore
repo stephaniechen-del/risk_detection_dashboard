@@ -1,8 +1,11 @@
 .DS_Store
+.env
 node_modules/
 npm-debug.log
 data/*.json
 data/uploads/
+data/prepared-uploads/
+data/redshift/
 *.csv
 __pycache__/
 *.pyc
